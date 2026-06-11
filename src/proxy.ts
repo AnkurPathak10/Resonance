@@ -10,30 +10,36 @@ const isOrgSelectionRoute = createRouteMatcher([
   "/org-selection(.*)",
 ]);
 
-export default clerkMiddleware(async (auth, req) => {
-  const { userId, orgId } = await auth();
+export default clerkMiddleware(
+  async (auth, req) => {
+    const { userId, orgId } = await auth();
 
-  // Allow public routes
-  if (isPublicRoute(req)) {
+    // Allow public routes
+    if (isPublicRoute(req)) {
+      return NextResponse.next();
+    }
+
+    if (!userId) {
+      await auth.protect();
+    }
+
+    if (isOrgSelectionRoute(req)) {
+      return NextResponse.next();
+    }
+
+    // For every protected route, ensure org is selected
+    if (userId && !orgId) {
+      const orgSelection = new URL("/org-selection", req.url);
+      return NextResponse.redirect(orgSelection);
+    }
+
     return NextResponse.next();
-  }
-
-  if(!userId){
-    await auth.protect();
-  }
-
-  if(isOrgSelectionRoute(req)){
-    return NextResponse.next();
-  }
-
-  //for every protected route, ensure org is selected
-  if(userId && !orgId){
-    const orgSelection = new URL("/org-selection", req.url);
-    return NextResponse.redirect(orgSelection);
-  }
-
-  return NextResponse.next();
-});
+  },
+  {
+    // Local machine clock is ~9s behind Clerk; default tolerance is 5s
+    clockSkewInMs: process.env.NODE_ENV === "development" ? 15_000 : 5_000,
+  },
+);
 
 export const config = {
   matcher: [
