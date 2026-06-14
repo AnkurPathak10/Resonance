@@ -99,7 +99,7 @@ export function DashboardSidebar() {
         },
         {
             title: "Help & Support",
-            url: "ankur.business10@gmail.com",
+            url: "mailto:ankur.business10@gmail.com",
             icon: Headphones,
         }
     ]
