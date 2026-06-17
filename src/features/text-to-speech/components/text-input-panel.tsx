@@ -19,7 +19,7 @@ import { ttsFormOptions } from "./text-to-speech-form";
 import { GenerateButton } from "./generate-button";
 // import { PromptSuggestions } from "./prompt-suggestions";
 
-export function TextInputPanel() {
+export function TextInputPanel() {  //main input panel for text to speech
   const form = useTypedAppFormContext(ttsFormOptions);
 
   const text = useStore(form.store, (s) => s.values.text);
