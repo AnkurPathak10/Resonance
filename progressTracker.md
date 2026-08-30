@@ -2,7 +2,7 @@
 
 > Living documentation for what has been built, how it works, and which tools/packages power each part of the app.
 >
-> Last updated: August 26, 2026
+> Last updated: August 30, 2026
 
 ---
 
@@ -32,9 +32,10 @@
 3. Enter text and tune generation parameters (temperature, top-p, etc.)
 4. Backend calls the **Chatterbox TTS API** (GPU service on Modal) using reference audio stored in **Cloudflare R2**
 5. Generated WAV is saved to R2 and tracked in **PostgreSQL** as a `Generation`
-6. User plays back audio from generation history
+6. User is redirected to `/text-to-speech/[generationId]` to play back audio using an interactive waveform player powered by **WaveSurfer.js**
+7. User plays back audio and accesses generation history
 
-**Current state:** The UI shell, auth, database layer, voice listing, and backend generation logic are largely built. The full generate → store → playback loop is **not wired end-to-end yet** (see [§11](#11-whats-done-vs-pending)).
+**Current state:** Core TTS pipeline is **fully functional end-to-end** — text input → GPU inference → R2 storage → DB tracking → detail page redirect → interactive WaveSurfer audio waveform playback + download.
 
 ---
 
@@ -75,6 +76,13 @@
 | `@aws-sdk/s3-request-presigner` | Presigned URLs for private audio playback |
 | `openapi-fetch` | Typed HTTP client for the Chatterbox TTS API |
 | `openapi-typescript` (dev) | Generates TypeScript types from Chatterbox OpenAPI spec |
+
+### Audio & Waveform Visualization
+
+| Package | Purpose |
+|---------|---------|
+| `wavesurfer.js` | Interactive audio waveform rendering, audio decoding, playback controls |
+| `date-fns` | Timestamp & audio duration formatting (`mm:ss`) |
 
 ### UI & Styling
 
@@ -128,12 +136,26 @@ resonance/
 ├── src/
 │   ├── app/                       # Next.js App Router (pages + API)
 │   │   ├── (dashboard)/           # Authenticated dashboard routes
+│   │   │   ├── layout.tsx         # Dashboard sidebar layout
+│   │   │   ├── page.tsx           # Dashboard home page
+│   │   │   └── text-to-speech/    # TTS editor & generation playback
+│   │   │       ├── layout.tsx     # TTS layout wrapper
+│   │   │       ├── page.tsx       # Main TTS creation page
+│   │   │       └── [generationId]/ # Playback & detail view route
 │   │   ├── sign-in/, sign-up/     # Clerk auth pages
 │   │   ├── org-selection/         # Clerk org picker
-│   │   └── api/trpc/              # tRPC HTTP handler
+│   │   └── api/
+│   │       ├── trpc/              # tRPC HTTP handler
+│   │       └── audio/             # Audio proxy & streaming route
+│   │           └── [generationId]/ # GET /api/audio/[generationId]
 │   ├── features/                  # Feature-based modules
 │   │   ├── dashboard/             # Home page components & views
-│   │   ├── text-to-speech/        # TTS editor UI
+│   │   ├── text-to-speech/        # TTS editor, player & detail view
+│   │   │   ├── components/        # Form, sliders, selector, waveform player (panel & mobile)
+│   │   │   ├── contexts/          # TTS voices context
+│   │   │   ├── data/              # Constants, slider configurations
+│   │   │   ├── hooks/             # useWaveSurfer audio player hook
+│   │   │   └── views/             # TextToSpeechView, TextToSpeechDetailView
 │   │   └── voices/                # Voice data/constants (no page yet)
 │   ├── components/                # Shared UI (shadcn) + voice-avatar
 │   ├── hooks/                     # useAppForm, useMobile
@@ -147,25 +169,27 @@ resonance/
 
 ### Patterns Used
 
-- **Feature-based organization** — Each domain (`dashboard`, `text-to-speech`, `voices`) has its own `components/`, `views/`, `data/`, and optionally `contexts/`
+- **Feature-based organization** — Each domain (`dashboard`, `text-to-speech`, `voices`) has its own `components/`, `views/`, `data/`, `hooks/`, and optionally `contexts/`
 - **tRPC + TanStack Query** — Single API endpoint at `/api/trpc`; type-safe calls from client and server
 - **Org-scoped multi-tenancy** — All business data filtered by Clerk `orgId` via `orgProcedure`
 - **shadcn/ui** — Radix-based components in `src/components/ui/`
 - **Prisma 7 driver adapter** — Client generated to `src/generated/prisma`, connects via `@prisma/adapter-pg`
 - **OpenAPI-typed external API** — `openapi-fetch` client + auto-generated `chatterbox-api.d.ts`
+- **WaveSurfer.js Visualizer** — Custom React hook (`useWaveSurfer`) for interactive canvas waveform decoding and synchronized audio controls
 
 ### App Routes
 
 | Route | File | Status |
 |-------|------|--------|
 | `/` | `src/app/(dashboard)/page.tsx` | ✅ Built |
-| `/text-to-speech` | `src/app/(dashboard)/text-to-speech/page.tsx` | ✅ Built (UI only) |
+| `/text-to-speech` | `src/app/(dashboard)/text-to-speech/page.tsx` | ✅ Built (Create Form) |
+| `/text-to-speech/[generationId]` | `src/app/(dashboard)/text-to-speech/[generationId]/page.tsx` | ✅ Built (Detail View & WaveSurfer Player) |
 | `/sign-in/*` | `src/app/sign-in/[[...sign-up]]/page.tsx` | ✅ Built |
 | `/sign-up/*` | `src/app/sign-up/[[...sign-up]]/page.tsx` | ✅ Built |
 | `/org-selection` | `src/app/org-selection/page.tsx` | ✅ Built |
 | `/api/trpc/*` | `src/app/api/trpc/[trpc]/route.ts` | ✅ Built |
+| `/api/audio/[generationId]` | `src/app/api/audio/[generationId]/route.ts` | ✅ Built (Authenticated WAV Stream from R2) |
 | `/voices` | — | ❌ Not built (sidebar link exists) |
-| `/api/audio/[id]` | — | ❌ Not built (referenced in generations router) |
 
 ---
 
@@ -304,12 +328,12 @@ User types text → clicks submit
 
 ### 6.2 Text-to-Speech Editor
 
-**Status:** ✅ UI complete · ❌ Generate not wired to backend
+**Status:** ✅ Fully built & wired end-to-end
 
 **What it does:**
-- Full TTS editor with text input, voice selector, 4 parameter sliders, settings/history tabs, and cost estimate
+- Full TTS editor with text input, voice selector, 4 parameter sliders, settings/history tabs, and real-time cost estimate
 - Accepts URL search params: `?text=` and `?voiceId=` (from dashboard quick actions)
-- **Generate button exists but `onSubmit` is a stub** — does not call the API yet
+- Submitting triggers `trpc.generations.create.mutateAsync`, displays loading state on button with `Spinner`, shows toast notification on success/error, and redirects to `/text-to-speech/[generationId]`
 
 **Key files:**
 
@@ -317,15 +341,15 @@ User types text → clicks submit
 |------|------|
 | `src/app/(dashboard)/text-to-speech/page.tsx` | Server page — prefetches voices, passes search params |
 | `src/features/text-to-speech/views/text-to-speech-view.tsx` | Main client view — loads voices, wraps form |
-| `src/features/text-to-speech/views/text-to-speech-layout.tsx` | Layout wrapper |
-| `src/features/text-to-speech/components/text-to-speech-form.tsx` | TanStack Form setup + validation schema |
-| `src/features/text-to-speech/components/text-input-panel.tsx` | Textarea + character count + cost estimate |
+| `src/features/text-to-speech/views/text-to-speech-layout.tsx` | Layout wrapper (header + children) |
+| `src/features/text-to-speech/components/text-to-speech-form.tsx` | TanStack Form setup + Zod validation schema + `createMutation` execution & toast feedback |
+| `src/features/text-to-speech/components/text-input-panel.tsx` | Textarea + character count + cost estimate + submit trigger |
 | `src/features/text-to-speech/components/voice-selector.tsx` | Voice dropdown (custom + system groups) |
-| `src/features/text-to-speech/components/settings-panel.tsx` | Settings/History tab container |
+| `src/features/text-to-speech/components/settings-panel.tsx` | Settings/History tab container (sidebar) |
 | `src/features/text-to-speech/components/settings-panel-settings.tsx` | Temperature, topP, topK, repetition penalty sliders |
 | `src/features/text-to-speech/components/settings-panel-history.tsx` | History tab (placeholder empty state) |
-| `src/features/text-to-speech/components/generate-button.tsx` | Submit button |
-| `src/features/text-to-speech/components/voice-preview-placeholder.tsx` | Audio preview area (placeholder) |
+| `src/features/text-to-speech/components/generate-button.tsx` | Submit button with `onClick` handler and loading spinner |
+| `src/features/text-to-speech/components/voice-preview-placeholder.tsx` | Audio preview placeholder before generation |
 | `src/features/text-to-speech/contexts/tts-voices-context.tsx` | React context sharing voice lists |
 | `src/features/text-to-speech/data/constants.ts` | `TEXT_MAX_LENGTH=5000`, `COST_PER_UNIT=0.0003` |
 | `src/features/text-to-speech/data/sliders.ts` | Slider min/max/step config |
@@ -342,24 +366,18 @@ User types text → clicks submit
 }
 ```
 
-**Current data flow:**
+**Data flow:**
 ```
-Server page → prefetch(trpc.voices.getAll)
-  → Client: useSuspenseQuery(trpc.voices.getAll)
-  → TTSVoicesProvider wraps form with voice lists
-  → User fills form → clicks Generate
-  → form.onSubmit() → (empty stub — nothing happens)
-```
-
-**Intended data flow (once wired):**
-```
-User clicks Generate
-  → trpc.generations.create.mutate({ text, voiceId, temperature, topP, topK, repetitionPenalty })
-  → Backend validates voice → calls Chatterbox API → saves to R2 + DB
-  → Returns { id } → client plays audio via /api/audio/{id}
+1. User enters text, selects voice, adjusts sliders
+2. Click "Generate speech" → form.handleSubmit()
+3. Form validates via Zod schema (ttsFormSchema)
+4. Calls trpc.generations.create.mutateAsync(...)
+5. Backend invokes Chatterbox GPU on Modal → receives WAV → uploads to R2 → stores Generation in DB
+6. Toast shows "Audio generated successfully"
+7. router.push(`/text-to-speech/${data.id}`)
 ```
 
-**Packages used:** `@tanstack/react-form`, `@tanstack/react-query`, tRPC, Zod, shadcn UI
+**Packages used:** `@tanstack/react-form`, `@tanstack/react-query`, tRPC, Zod, `sonner`, shadcn UI
 
 **Cost estimation:** `characterCount × $0.0003` displayed in UI
 
@@ -411,18 +429,30 @@ trpc.voices.delete.mutate({ id })
 
 ---
 
-### 6.4 Generations (Audio Generation & History)
+### 6.4 Generations, WaveSurfer Audio Player & Detail View
 
-**Status:** ✅ Backend router written · ❌ Not mounted in app router · ❌ UI is placeholder · ❌ Audio playback route missing
+**Status:** ✅ Fully built & mounted
 
-**What it does (intended):**
-- Creates a generation record, calls Chatterbox TTS, uploads WAV to R2, updates DB
-- Lists past generations for the org
-- Returns audio URL for playback
+**What it does:**
+- Generates speech via Chatterbox on Modal GPU, uploads WAV to Cloudflare R2, records `Generation` in PostgreSQL with denormalized voice name snapshots
+- Dynamic generation page (`/text-to-speech/[generationId]`) that hydrates generation data and preserves form parameters
+- Interactive audio waveform visualizer using **WaveSurfer.js** with theme-matched color styling
+- Playback controls: play/pause toggle, skip 10s backward/forward, dynamic time counter (`mm:ss / mm:ss`), and WAV download
+- Responsive mobile playback bar using native HTML5 audio
+- Authenticated audio stream proxy route at `/api/audio/[generationId]`
 
 **Key files:**
-- `src/trpc/routers/generations.ts` — Full CRUD logic (not mounted yet)
-- `src/features/text-to-speech/components/settings-panel-history.tsx` — Static "No generations yet" placeholder
+
+| File | Role |
+|------|------|
+| `src/trpc/routers/generations.ts` | Backend router (`create`, `getById`, `getAll`) |
+| `src/trpc/routers/_app.ts` | App router mounting `generations: generationsRouter` |
+| `src/app/(dashboard)/text-to-speech/[generationId]/page.tsx` | Server page — prefetches generation and voice queries |
+| `src/features/text-to-speech/views/text-to-speech-detail-view.tsx` | Detail view — syncs form state with generation data, renders waveform player |
+| `src/features/text-to-speech/hooks/use-wavesurfer.ts` | Custom hook for WaveSurfer.js lifecycle, canvas rendering, autoplay & seeking |
+| `src/features/text-to-speech/components/voice-preview-panel.tsx` | Desktop audio waveform player, duration display, controls & download button |
+| `src/features/text-to-speech/components/voice-preview-mobile.tsx` | Mobile compact audio player bar with native `<audio>` element |
+| `src/app/api/audio/[generationId]/route.ts` | Route Handler serving authenticated WAV audio via presigned R2 URL |
 
 **Create generation data flow:**
 ```
@@ -452,15 +482,18 @@ trpc.generations.create.mutate(input)
   On failure after step 3: rollback — delete the Generation row
 ```
 
-**Get generation data flow:**
+**Playback & Waveform data flow:**
 ```
-trpc.generations.getById({ id })
-  → Find by id + orgId
-  → Return fields + audioUrl: "/api/audio/{id}"
-  (audio route not built yet)
+1. Detail page loads /text-to-speech/[generationId]
+2. Query trpc.generations.getById({ id }) → returns generation data + audioUrl: `/api/audio/${id}`
+3. VoicePreviewPanel mounts → useWaveSurfer initializes WaveSurfer on container <div>
+4. WaveSurfer loads `/api/audio/${generationId}`
+5. GET /api/audio/[generationId] verifies Clerk auth (userId + orgId) → verifies generation in DB → gets presigned R2 URL → streams WAV audio buffer
+6. WaveSurfer decodes audio waveform, renders interactive canvas bars, and starts autoplay
+7. User can scrub waveform, toggle play/pause, skip ±10s, or download the .wav file
 ```
 
-**Packages used:** tRPC, Prisma, `openapi-fetch` (Chatterbox client), `@aws-sdk/client-s3` (R2 upload)
+**Packages used:** `wavesurfer.js`, `date-fns`, tRPC, Prisma, `@clerk/nextjs`, `openapi-fetch` (Chatterbox client), `@aws-sdk/client-s3` (R2 upload & presigned URL)
 
 ---
 
@@ -567,12 +600,6 @@ modal run chatterbox_tts.py --prompt "Hello" --voice-key "voices/system/<voice-i
 - **Input:** `{ id: string }`
 - **Returns:** `{ success: true }`
 - **Logic:** Delete CUSTOM voice owned by org; best-effort R2 cleanup
-
----
-
-### Written But NOT Mounted
-
-> These exist in `src/trpc/routers/generations.ts` but are **not imported** in `_app.ts`. Add `generations: generationsRouter` to enable them.
 
 #### `generations.getAll` — Query (`orgProcedure`)
 
@@ -698,11 +725,15 @@ npx prisma db seed
 | **tRPC setup** | Client, server, React Query integration, superjson transformer |
 | **Org-scoped procedures** | `orgProcedure` enforces userId + orgId on all business API calls |
 | **Voices API** | `getAll` (with search) and `delete` mounted and working |
+| **Generations API** | `generations.create`, `generations.getById`, `generations.getAll` mounted in `_app.ts` |
 | **System voice seeding** | Script to upload 20 voices to DB + R2 |
 | **Dashboard UI** | Home page with greeting, text input, quick actions, hero animation |
-| **TTS editor UI** | Full form with text input, voice selector, 4 sliders, settings/history tabs, cost estimate |
+| **TTS editor UI & wiring** | Full form with text input, voice selector, 4 sliders, cost estimate, and `onSubmit` calling `generations.create` with Sonner toast feedback |
 | **Voice avatars** | DiceBear glass-style avatars seeded by voice ID |
-| **Generations backend** | Full create/getAll/getById router with Chatterbox + R2 integration |
+| **Generations backend** | Full create/getAll/getById router with Chatterbox GPU + R2 integration |
+| **Audio streaming API route** | `GET /api/audio/[generationId]` authenticated route streaming WAV audio via presigned R2 URLs |
+| **WaveSurfer audio visualizer** | Interactive audio waveform player (`useWaveSurfer` hook, `VoicePreviewPanel`, and mobile `VoicePreviewMobile`) |
+| **Generation detail page** | `/text-to-speech/[generationId]` route with query prefetching and synchronized parameter form |
 | **R2 storage helpers** | Upload, delete, presigned URL functions |
 | **Chatterbox TTS service** | Modal GPU deployment with FastAPI, R2 mount, API key auth |
 | **OpenAPI type sync** | Script to generate TS types from Chatterbox API spec |
@@ -712,25 +743,18 @@ npx prisma db seed
 
 | Area | What's Missing | Files to Touch |
 |------|----------------|----------------|
-| **Generate button** | `onSubmit` in TTS form is empty stub | `src/features/text-to-speech/components/text-to-speech-form.tsx` |
-| **Generations router** | Not imported in `_app.ts` — API unreachable | `src/trpc/routers/_app.ts` |
-| **Generation history UI** | Static "No generations yet" placeholder | `src/features/text-to-speech/components/settings-panel-history.tsx` |
-| **Audio playback** | `/api/audio/[id]` route doesn't exist | Create `src/app/api/audio/[id]/route.ts` using `getSignedAudioUrl` |
-| **Voices page** | `/voices` linked in sidebar but no page | Create `src/app/(dashboard)/voices/page.tsx` |
-| **Voice cloning** | Sidebar item has no URL or implementation | New feature — upload reference audio, create CUSTOM voice |
-| **Clerk middleware** | `src/proxy.ts` exists but no `middleware.ts` | Rename/move to `src/middleware.ts` |
-| **Voice preview** | Placeholder component, no audio playback | `src/features/text-to-speech/components/voice-preview-placeholder.tsx` |
+| **Generation history UI** | History tab lists past generations with click-to-load/play (currently placeholder) | `src/features/text-to-speech/components/settings-panel-history.tsx` |
+| **Voices page** | `/voices` linked in sidebar but no dedicated explore/browse page | Create `src/app/(dashboard)/voices/page.tsx` |
+| **Voice cloning** | Upload reference audio → create CUSTOM voice | New feature flow |
+| **Clerk middleware** | `src/proxy.ts` exists but no active `middleware.ts` | Rename/move to `src/middleware.ts` |
 | **Prisma migrations** | Only schema file, no migration history in repo | Run `npx prisma migrate dev` |
 
 ### Next Steps (Suggested Order)
 
 1. **Activate middleware** — Move `src/proxy.ts` → `src/middleware.ts`
-2. **Mount generations router** — Add to `_app.ts`
-3. **Wire generate button** — Call `trpc.generations.create` in form `onSubmit`
-4. **Build audio route** — `GET /api/audio/[id]` → presigned R2 URL redirect/stream
-5. **Build history UI** — Fetch `generations.getAll`, display list with playback
-6. **Build `/voices` page** — Browse/search all voices
-7. **Voice cloning flow** — Upload reference audio → create CUSTOM voice
+2. **Build generation history list UI** — Fetch `generations.getAll` in `settings-panel-history.tsx` to list past generations with playback links
+3. **Build `/voices` explore page** — Browse/search all available voices
+4. **Voice cloning flow** — Upload reference audio → create CUSTOM voice in DB and R2
 
 ---
 

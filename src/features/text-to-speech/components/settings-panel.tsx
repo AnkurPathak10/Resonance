@@ -15,7 +15,7 @@ const tabTriggerClassName =
 
 export function SettingsPanel() {
    return (
-    <div className="hidden w-105 min-h-0 flex-col border-l lg:flex">
+    <div className="hidden w-72 shrink-0 min-h-0 flex-col border-l lg:flex">
       <Tabs
         defaultValue="settings"
         className="flex h-full min-h-0 flex-col gap-y-0"
