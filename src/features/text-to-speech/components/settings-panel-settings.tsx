@@ -19,7 +19,6 @@ export function SettingsPanelSettings() {
       {/* Voice Style Dropdown Section */}
       <div className="border-b border-dashed p-4">
         <VoiceSelector />
-        coming soon
       </div>
 
       {/* Voice Adjustments Section */}

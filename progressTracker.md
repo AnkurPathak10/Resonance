@@ -759,3 +759,183 @@ npx prisma db seed
 ---
 
 *This document should be updated as features are completed. When you finish a pending item, move it to the Done section and add implementation notes.*
+
+---
+
+## 12. Latest Updates — Generation History, Mobile Drawers & Prompt Suggestions
+
+> **PR Summary:** Complete implementation of generation history listing with direct playback links, responsive mobile drawer controls (Voice Selector, Settings & History bottom sheets), clickable prompt suggestions for quick text input, and TTS route loading skeleton.
+
+---
+
+### 12.1 Generation History UI in Settings Panel
+
+**Status:** ✅ Complete & Live
+
+**What it does:**
+- Replaced the placeholder empty state in the desktop Settings Panel History tab with live query data from PostgreSQL via tRPC.
+- Fetches all generations for the current organization using `trpc.generations.getAll.queryOptions()` wrapped in `@tanstack/react-query`'s `useSuspenseQuery`.
+- When no generations exist (`generations.length === 0`), displays a custom empty state illustration featuring overlapping angled icons (`AudioLines`, `AudioWaveform`, `Clock`) with background contrasts and helper copy ("No generations yet — Generate some audio and it will appear here").
+- When generations exist, renders a vertically scrollable list of past generation cards.
+- Each generation item is wrapped in a Next.js `Link` navigating directly to `/text-to-speech/${generation.id}` for playback in the WaveSurfer audio player.
+- Each item displays:
+  - Truncated prompt text (`generation.text`) with font weighting and theme-aware colors
+  - Deterministic voice avatar (`VoiceAvatar`) seeded by `generation.voiceId ?? generation.voiceName`
+  - Snapshot voice display name (`generation.voiceName`)
+  - Relative timestamp calculated using `date-fns`'s `formatDistanceToNow(new Date(generation.createdAt), { addSuffix: true })` (e.g., "5 minutes ago", "about 2 hours ago")
+  - Smooth hover background transitions (`hover:bg-muted`)
+
+**Key file:**
+- `src/features/text-to-speech/components/settings-panel-history.tsx`
+
+**Data flow:**
+```
+SettingsPanel → TabsContent (value="history") → SettingsPanelHistory
+  → useSuspenseQuery(trpc.generations.getAll.queryOptions())
+  → PostgreSQL returns Generation[] (ordered by createdAt DESC)
+  → If empty: renders decorative empty state
+  → If populated: renders Link cards to /text-to-speech/${generation.id}
+  → Clicking a card routes to generation detail page with WaveSurfer audio visualizer
+```
+
+**Packages used:** `@tanstack/react-query`, `@trpc/client`, `date-fns`, `lucide-react`, Next.js `Link`, `@dicebear/core` (via `VoiceAvatar`)
+
+---
+
+### 12.2 Responsive Mobile Layout (Drawers & Adaptive Controls)
+
+**Status:** ✅ Complete & Live
+
+**What it does:**
+- Solves the mobile viewport limitation where the desktop sidebar (`SettingsPanel`, `hidden lg:flex w-72`) is hidden on viewports smaller than `lg` (1024px).
+- Introduces mobile bottom sheet drawers using shadcn/ui `Drawer` (powered by the `vaul` primitive) to make voice selection, parameter adjustment, and generation history fully accessible on smartphones and tablets.
+- Updates `TextInputPanel` with an adaptive mobile control bar (`lg:hidden`) positioned directly above the submit button.
+
+**Key files & components:**
+
+| File | Component | Role |
+|------|-----------|------|
+| `src/features/text-to-speech/components/voice-selector-button.tsx` | `VoiceSelectorButton` | Mobile trigger button displaying active voice avatar, voice name, and dropdown chevron. Connected to TanStack Form state. |
+| `src/features/text-to-speech/components/settings-drawer.tsx` | `SettingsDrawer` | Bottom sheet drawer hosting `SettingsPanelSettings` (voice dropdown + 4 adjustment sliders). |
+| `src/features/text-to-speech/components/history-drawer.tsx` | `HistoryDrawer` | Bottom sheet drawer hosting `SettingsPanelHistory` for mobile history browsing. |
+| `src/features/text-to-speech/components/text-input-panel.tsx` | `TextInputPanel` | Wires the mobile action bar (`SettingsDrawer` + `HistoryDrawer` + full-width `GenerateButton`). |
+
+**Architecture & Logic:**
+
+1. **`VoiceSelectorButton` (`voice-selector-button.tsx`):**
+   - Configured as a `DrawerTrigger asChild` button.
+   - Accesses form context via `useTypedAppFormContext(ttsFormOptions)`.
+   - Subscribes reactively to `form.store` via `useStore(form.store, (s) => s.values.voiceId)`.
+   - Retrieves `allVoices` from `useTTSVoices()`, finding the matching voice object or defaulting to the first available voice.
+   - Renders a compact button displaying a `VoiceAvatar` (size 24px), truncated voice name, and `ChevronDown` indicator.
+
+2. **`SettingsDrawer` (`settings-drawer.tsx`):**
+   - Wraps the voice selector button (or an optional fallback `Settings` icon button) inside `DrawerTrigger`.
+   - When tapped, slides up a mobile bottom sheet with `DrawerHeader`, `DrawerTitle` ("Settings"), and a scrollable viewport (`overflow-y-auto`).
+   - Renders the complete `SettingsPanelSettings` component inside the drawer, allowing mobile users to choose from custom/system voices and fine-tune temperature, top-p, top-k, and repetition penalty.
+
+3. **`HistoryDrawer` (`history-drawer.tsx`):**
+   - Triggered by an outline button with the `History` icon.
+   - Opens a mobile bottom sheet containing `SettingsPanelHistory`.
+   - Users can scroll through past generations, see relative timestamps and voice avatars, and tap any generation to navigate to its detail/playback page.
+
+4. **`TextInputPanel` Integration (`text-input-panel.tsx`):**
+   - Mobile view (`lg:hidden`):
+     ```tsx
+     <div className="flex items-center gap-2">
+       <SettingsDrawer>
+         <VoiceSelectorButton />
+       </SettingsDrawer>
+       <HistoryDrawer />
+     </div>
+     <GenerateButton className="w-full" disabled={isSubmitting} />
+     ```
+   - Retains the character counter badge (`{charactersRemaining} characters left`) and dynamic cost estimate badge (`${estimatedCost.toFixed(4)}`).
+
+**Packages used:** `vaul` / shadcn `Drawer`, `@tanstack/react-form`, `lucide-react`, shadcn `Button`
+
+---
+
+### 12.3 Interactive Prompt Suggestions
+
+**Status:** ✅ Complete & Live
+
+**What it does:**
+- Provides a curated set of 8 starter prompts with distinct themes and icons to guide users and enable instant one-click testing of voice models.
+- Displays below the character count and cost badges on desktop viewports (`hidden lg:block`).
+- Clicking any suggestion immediately populates the form textarea via `form.setFieldValue("text", prompt)` without a page reload.
+
+**Key files:**
+- `src/features/text-to-speech/components/prompt-suggestions.tsx` — Component with prompt library and badge buttons
+- `src/features/text-to-speech/components/text-input-panel.tsx` — Mounted inside desktop textarea footer
+
+**Curated Prompt Library:**
+
+| Category / Label | Icon | Theme & Purpose |
+|------------------|------|-----------------|
+| **Narrate a story** | `BookOpen` | Mystery/fantasy storytelling with atmospheric pacing |
+| **Tell a silly joke** | `Smile` | Lighthearted, conversational dialogue and comedic timing |
+| **Record an advertisement** | `Mic` | Commercial copywriting (BrightBean Coffee promotion) |
+| **Speak in different languages** | `Languages` | Multilingual greeting (English, French, Spanish, German, Italian) |
+| **Direct a dramatic movie scene** | `Clapperboard` | High-tension cinematic dialogue and emotional depth |
+| **Hear from a video game character** | `Gamepad2` | Immersive RPG fantasy character briefing |
+| **Introduce your podcast** | `Podcast` | High-energy intro for an episodic show |
+| **Guide a meditation class** | `Brain` | Soothing, slow-tempo mindfulness instruction |
+
+**Implementation details:**
+- Each item is styled using shadcn `Badge` (`variant="outline"`) with `cursor-pointer`, `hover:bg-accent`, and rounded corners.
+- Icons from `lucide-react` provide instant visual categorization.
+- Integrates with TanStack Form via callback: `(prompt) => form.setFieldValue("text", prompt)`.
+
+---
+
+### 12.4 Text-to-Speech Route Loading Skeleton
+
+**Status:** ✅ Built
+
+**What it does:**
+- Next.js loading skeleton for `/text-to-speech` that renders instantly while server components and queries are suspended or prefetching.
+- Faithfully mirrors the dual-panel desktop and mobile layout:
+  - Input area: Large textarea skeleton (`h-full w-full rounded-xl`).
+  - Mobile action bar skeleton: Side-by-side button skeletons and full-width generate button skeleton.
+  - Desktop footer skeleton: Prompt suggestions bar skeleton and submit button skeleton.
+  - Bottom player: Renders `VoicePreviewPlaceholder` for seamless visual continuity.
+  - Desktop right sidebar: Tab triggers skeleton, voice dropdown skeleton, and 4 slider rows (creativity, variety, range, flow) with labels and bar skeletons.
+
+**Key file:**
+- `src/app/(dashboard)/text-to-speech/loading..tsx`
+
+**Packages used:** shadcn `Skeleton`, `VoicePreviewPlaceholder`
+
+---
+
+### 12.5 Settings Panel Clean-up
+
+**Status:** ✅ Complete
+
+**File:** `src/features/text-to-speech/components/settings-panel-settings.tsx`
+- Removed lingering development placeholder text ("coming soon") under `<VoiceSelector />`.
+
+---
+
+### 12.6 Summary of Changed & Untracked Files in this PR
+
+| File Path | Status | Role & Changes |
+|-----------|--------|----------------|
+| `src/features/text-to-speech/components/settings-panel-history.tsx` | Modified | Wired `useSuspenseQuery(trpc.generations.getAll)` with empty state & interactive history card list linking to detail page |
+| `src/features/text-to-speech/components/settings-panel-settings.tsx` | Modified | Cleaned up "coming soon" placeholder text beneath voice selector |
+| `src/features/text-to-speech/components/text-input-panel.tsx` | Modified | Activated mobile layout with `SettingsDrawer`, `VoiceSelectorButton`, `HistoryDrawer`, and mounted desktop `PromptSuggestions` |
+| `src/features/text-to-speech/components/history-drawer.tsx` | Untracked (New) | Mobile bottom sheet drawer housing `SettingsPanelHistory` |
+| `src/features/text-to-speech/components/settings-drawer.tsx` | Untracked (New) | Mobile bottom sheet drawer housing `SettingsPanelSettings` with custom trigger support |
+| `src/features/text-to-speech/components/voice-selector-button.tsx` | Untracked (New) | Reactive mobile button displaying current voice avatar & label, acting as `SettingsDrawer` trigger |
+| `src/features/text-to-speech/components/prompt-suggestions.tsx` | Untracked (New) | 8 curated starter prompt badges with icons for quick form text population |
+| `src/app/(dashboard)/text-to-speech/loading..tsx` | Untracked (New) | Dual-layout loading skeleton for the TTS route |
+
+---
+
+### 12.7 Updated Feature Status
+
+- **Generation history UI:** Moved from ❌ Pending to ✅ Done.
+- **Mobile TTS configuration & history:** Moved from ❌ Missing to ✅ Done.
+- **Prompt inspiration:** ✅ Added.
+
