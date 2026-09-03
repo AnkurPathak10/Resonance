@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { uploadAudio } from "@/lib/r2";
 import { TEXT_MAX_LENGTH } from "@/features/text-to-speech/data/constants";
 import { createTRPCRouter, orgProcedure } from "../init";
+import * as Sentry from "@sentry/nextjs";
 
 export const generationsRouter = createTRPCRouter({
     getById: orgProcedure
@@ -96,6 +97,12 @@ export const generationsRouter = createTRPCRouter({
                 parseAs: "arrayBuffer",
             });
 
+            Sentry.logger.info("Generation started", {
+                orgId: ctx.orgId,
+                voiceId: input.voiceId,
+                textLength: input.text.length,
+            });
+
             if(error){
                 throw new TRPCError({ 
                     code: "INTERNAL_SERVER_ERROR" ,
@@ -136,6 +143,11 @@ export const generationsRouter = createTRPCRouter({
                     where: {id: generationId},
                     data: {r2ObjectKey},
                 });
+
+                Sentry.logger.info("Audio generated", {
+                    orgId: ctx.orgId,
+                    generationId: generation.id,
+                });
             } catch {
                 if(generationId){
                     await prisma.generation.delete({
@@ -145,6 +157,12 @@ export const generationsRouter = createTRPCRouter({
                     })
                     .catch(() => {});
                 }
+
+                Sentry.logger.error("Generation failed", {
+                    orgId: ctx.orgId,
+                    voiceId: input.voiceId,
+                });
+
                 throw new TRPCError({ 
                     code: "INTERNAL_SERVER_ERROR" ,
                     message:"Failed to create generation",

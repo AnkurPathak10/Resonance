@@ -939,3 +939,169 @@ SettingsPanel → TabsContent (value="history") → SettingsPanelHistory
 - **Mobile TTS configuration & history:** Moved from ❌ Missing to ✅ Done.
 - **Prompt inspiration:** ✅ Added.
 
+---
+
+## 13. Sentry Full-Stack Error Monitoring & Observability
+
+> **PR Summary:** Integrated Sentry across the entire Next.js App Router application (client, server, edge runtimes, tRPC procedures, and global error boundaries), with automated RPC input capture, tunnel routing to circumvent ad-blockers, and structured lifecycle telemetry in the TTS generation pipeline.
+
+---
+
+### 13.1 Overview & Architecture
+
+Resonance now uses **Sentry (`@sentry/nextjs`)** for centralized error tracking, distributed tracing, and runtime observability.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                          Sentry Architecture                           │
+└────────────────────────────────────────────────────────────────────────┘
+
+    Client Browser                     Next.js Server / Edge               tRPC / Data Layer
+ ┌──────────────────────┐            ┌──────────────────────┐            ┌──────────────────────┐
+ │ instrumentation-     │            │ sentry.server.config │            │ src/trpc/init.ts     │
+ │ client.ts            │            │ sentry.edge.config   │            │ Sentry.trpcMiddleware│
+ │ • tracesSampleRate=1 │            │ • DSN & sample rate  │            │ (attachRpcInput:true)│
+ └──────────┬───────────┘            └──────────┬───────────┘            └──────────┬───────────┘
+            │                                   │                                   │
+            ▼                                   ▼                                   ▼
+ ┌──────────────────────┐            ┌──────────────────────┐            ┌──────────────────────┐
+ │ src/app/global-error │            │ src/instrumentation  │            │ generations.ts       │
+ │ • captureException() │            │ • register()         │            │ • Sentry.logger.info │
+ └──────────┬───────────┘            │ • onRequestError()   │            │ • Sentry.logger.error│
+            │                                   │                        └──────────┬───────────┘
+            └─────────────────┬─────────────────┘                                   │
+                              ▼                                                     │
+                   ┌──────────────────────┐                                         │
+                   │ Tunnel: /monitoring  │ ◄───────────────────────────────────────┘
+                   │ (bypasses ad-block)  │
+                   └──────────┬───────────┘
+                              ▼
+                   ┌──────────────────────┐
+                   │  Sentry Cloud Ingest │
+                   │  (nodebase-vh/       │
+                   │   resonance)         │
+                   └──────────────────────┘
+```
+
+---
+
+### 13.2 Next.js Build & Tunnel Configuration
+
+**File:** `next.config.ts`
+
+Wrapped the primary Next.js configuration with `withSentryConfig` to enable compile-time source map uploads, tree-shaking, and request tunneling:
+
+```typescript
+export default withSentryConfig(nextConfig, {
+  org: "nodebase-vh",
+  project: "resonance",
+  silent: !process.env.CI,
+  widenClientFileUpload: true,
+  tunnelRoute: "/monitoring",
+  webpack: {
+    automaticVercelMonitors: true,
+    treeshake: {
+      removeDebugLogging: true,
+    },
+  },
+});
+```
+
+**Key configuration features:**
+- **Ad-blocker resilience via `tunnelRoute: "/monitoring"`:** Routes browser telemetry through a Next.js rewrite so client error reports aren't blocked by browser privacy extensions.
+- **`widenClientFileUpload: true`:** Generates and uploads comprehensive source maps for readable production stack traces.
+- **Tree-shaking (`removeDebugLogging: true`):** Strips debug logs from production bundles to optimize performance and bundle size.
+- **Git ignore:** Added `.env.sentry-build-plugin` to `.gitignore` to prevent leaking Sentry build authentication tokens.
+
+---
+
+### 13.3 Runtime Instrumentation & Client Initialization
+
+Sentry hooks into all execution runtimes via Next.js Instrumentation hooks:
+
+| File | Runtime | Purpose |
+|------|---------|---------|
+| `src/instrumentation.ts` | Server / Edge | Calls `register()` to dynamically load `sentry.server.config` or `sentry.edge.config` based on `process.env.NEXT_RUNTIME`. Exports `onRequestError = Sentry.captureRequestError` for unhandled route handler errors. |
+| `sentry.server.config.ts` | Node.js Server | Configures Sentry with project DSN and `tracesSampleRate: 1.0`. |
+| `sentry.edge.config.ts` | Edge Runtime | Configures Sentry for edge API routes and middleware. |
+| `src/instrumentation-client.ts` | Browser Client | Initializes client-side SDK with DSN, `tracesSampleRate: 1.0`, and exports `onRouterTransitionStart = Sentry.captureRouterTransitionStart` for App Router navigation tracing. |
+| `src/app/global-error.tsx` | React Root | Root Next.js error boundary that catches uncaught client-side rendering exceptions, calls `Sentry.captureException(error)`, and renders a fallback `<NextError statusCode={0} />`. |
+
+---
+
+### 13.4 tRPC Middleware Observability
+
+**File:** `src/trpc/init.ts`
+
+Integrated `Sentry.trpcMiddleware` directly into the base procedure chain:
+
+```typescript
+import * as Sentry from "@sentry/node";
+
+const sentryMiddleware = t.middleware(
+  Sentry.trpcMiddleware({
+    attachRpcInput: true,
+  }),
+);
+
+export const baseProcedure = t.procedure.use(sentryMiddleware);
+export const authProcedure = baseProcedure.use(async ({ next }) => { ... });
+export const orgProcedure = baseProcedure.use(async ({ next }) => { ... });
+```
+
+**How it works:**
+- Because `authProcedure` and `orgProcedure` both derive from `baseProcedure`, **every tRPC query and mutation in the application automatically runs through Sentry middleware**.
+- `attachRpcInput: true` securely attaches caller arguments (e.g. prompt length, voice ID, generation parameters) to Sentry breadcrumbs and transaction spans for debugging RPC failures.
+
+---
+
+### 13.5 TTS Generation Pipeline Telemetry & Structured Logging
+
+**File:** `src/trpc/routers/generations.ts`
+
+Instrumented the critical `generations.create` procedure with structured Sentry lifecycle logging:
+
+1. **Before GPU inference call:**
+   ```typescript
+   Sentry.logger.info("Generation started", {
+     orgId: ctx.orgId,
+     voiceId: input.voiceId,
+     textLength: input.text.length,
+   });
+   ```
+2. **On successful R2 upload & DB record update:**
+   ```typescript
+   Sentry.logger.info("Audio generated", {
+     orgId: ctx.orgId,
+     generationId: generation.id,
+   });
+   ```
+3. **On caught exception / rollback:**
+   ```typescript
+   Sentry.logger.error("Generation failed", {
+     orgId: ctx.orgId,
+     voiceId: input.voiceId,
+   });
+   ```
+   Provides immediate operational insight and context in Sentry dashboards whenever Chatterbox API or R2 storage calls encounter timeouts or errors.
+
+---
+
+### 13.6 Files Changed & Added for Sentry Integration
+
+| File Path | Status | Role |
+|-----------|--------|------|
+| `package.json` | Modified | Added `@sentry/nextjs` dependency |
+| `next.config.ts` | Modified | Wrapped with `withSentryConfig`, configured tunnel route `/monitoring`, source maps, tree-shaking |
+| `.gitignore` | Modified | Added `.env.sentry-build-plugin` |
+| `src/trpc/init.ts` | Modified | Added `Sentry.trpcMiddleware({ attachRpcInput: true })` to `baseProcedure`, added `authProcedure` |
+| `src/trpc/routers/generations.ts` | Modified | Added structured Sentry logger info/error calls during generation creation & rollback |
+| `sentry.server.config.ts` | New | Server-side Sentry initialization |
+| `sentry.edge.config.ts` | New | Edge runtime Sentry initialization |
+| `src/instrumentation.ts` | New | Next.js server/edge runtime registration and `captureRequestError` |
+| `src/instrumentation-client.ts` | New | Browser client Sentry initialization and router transition capture |
+| `src/app/global-error.tsx` | New | Root React error boundary capturing unhandled exceptions via `Sentry.captureException` |
+| `src/app/api/sentry-example-api/route.ts` | New | Sentry test route handler |
+| `src/app/sentry-example-page/page.tsx` | New | Sentry test page for manual verification |
+
+
