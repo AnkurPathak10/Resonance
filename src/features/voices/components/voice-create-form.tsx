@@ -64,7 +64,6 @@ import {
 } from "@/features/voices/data/voice-categories";
 import { VoiceRecorder } from "./voice-recorder";
 
-
 const LANGUAGE_OPTIONS = locales.all
   .filter((l) => l.tag && l.tag.includes("-") && l.name)
   .map((l) => ({
@@ -433,7 +432,7 @@ export function VoiceCreateForm({
 
             return (
               <Field data-invalid={isInvalid}>
-                <div className="relative flex items-center">
+<div className="relative flex items-center">
                   <div className="pointer-events-none absolute left-0 flex h-full w-11 items-center justify-center">
                     <Layers className="size-4 text-muted-foreground" />
                   </div>

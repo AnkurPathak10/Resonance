@@ -1,7 +1,5 @@
 import { AudioLines, Mic, Volume2 } from "lucide-react";
-
-import { VoiceCard } from "./voice-card";
-import type { VoiceItem } from "./voice-card";
+import { VoiceCard, VoiceItem } from "./voice-card";
 
 interface VoicesListProps {
   title: string;

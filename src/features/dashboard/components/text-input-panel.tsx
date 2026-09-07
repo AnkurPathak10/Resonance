@@ -26,10 +26,10 @@ export function TextInputPanel() {
             {/* Using px values for border-radius to ensure proper gradient border math (outer - padding = inner). */}
             {/* Standard classes like rounded-4xl use CSS calc() which doesn't align cleanly at corners. */}
             <div className="rounded-[20px] bg-[#F9F9F9] p-1">
-                <div className="space-y-4 rounded-2xl bg-white p-4 drop-shadow-xs">
+                <div className="space-y-4 rounded-2xl bg-white p-5 drop-shadow-xs">
                     <Textarea
                         placeholder="Start typing or paste your text here..."
-                        className="min-h-35 resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+                        className="min-h-35 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0"
                         value={text}
                         onChange={(e) => setText(e.target.value)}
                         maxLength={TEXT_MAX_LENGTH}
