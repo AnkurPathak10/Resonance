@@ -375,14 +375,14 @@ export function VoiceCreateForm({
                       Record
                     </TabsTrigger>
                   </TabsList>
-                  <TabsContent value="upload">
+                  <TabsContent value="upload" className="mt-4">
                     <FileDropzone
                       file={field.state.value}
                       onFileChange={field.handleChange}
                       isInvalid={isInvalid}
                     />
                   </TabsContent>
-                  <TabsContent value="record">
+                  <TabsContent value="record" className="mt-4">
                     <VoiceRecorder
                       file={field.state.value}
                       onFileChange={field.handleChange}
@@ -405,7 +405,7 @@ export function VoiceCreateForm({
             return (
               <Field data-invalid={isInvalid}>
                 <div className="relative flex items-center">
-                  <div className="pointer-events-none absolute left-0 flex h-full w-11 items-center justify-center">
+                  <div className="pointer-events-none absolute left-0 flex h-full w-9 items-center justify-center">
                     <Tag className="size-4 text-muted-foreground" />
                   </div>
                   <Input
@@ -415,7 +415,7 @@ export function VoiceCreateForm({
                     value={field.state.value}
                     onChange={(e) => field.handleChange(e.target.value)}
                     onBlur={field.handleBlur}
-                    className="pl-10"
+                    className="pl-11!"
                   />
 
                 </div>
@@ -432,15 +432,15 @@ export function VoiceCreateForm({
 
             return (
               <Field data-invalid={isInvalid}>
-<div className="relative flex items-center">
-                  <div className="pointer-events-none absolute left-0 flex h-full w-11 items-center justify-center">
+                <div className="relative flex items-center">
+                  <div className="pointer-events-none absolute left-0 z-10 flex h-full w-9 items-center justify-center">
                     <Layers className="size-4 text-muted-foreground" />
                   </div>
                   <Select
                     value={field.state.value}
                     onValueChange={field.handleChange}
                   >
-                    <SelectTrigger className="w-full pl-10">
+                    <SelectTrigger className="w-full pl-11!">
                       <SelectValue 
                         placeholder="Select category..."
                       />
@@ -485,7 +485,7 @@ export function VoiceCreateForm({
             return (
               <Field data-invalid={isInvalid}>
                 <div className="relative flex items-center">
-                  <div className="pointer-events-none absolute left-0 flex h-full w-11 items-center justify-center">
+                  <div className="pointer-events-none absolute left-0 top-3 flex h-4 w-9 items-center justify-center">
                     <AlignLeft className="size-4 text-muted-foreground" />
                   </div>
                   <Textarea
@@ -495,7 +495,7 @@ export function VoiceCreateForm({
                     value={field.state.value}
                     onChange={(e) => field.handleChange(e.target.value)}
                     onBlur={field.handleBlur}
-                    className="min-h-20 pl-10"
+                    className="min-h-20 pl-11!"
                     rows={3}
                   />
 
