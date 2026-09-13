@@ -1104,4 +1104,33 @@ Instrumented the critical `generations.create` procedure with structured Sentry 
 | `src/app/api/sentry-example-api/route.ts` | New | Sentry test route handler |
 | `src/app/sentry-example-page/page.tsx` | New | Sentry test page for manual verification |
 
+---
+
+## 14. Final Billing & Metering Integration
+
+**Status:** ✅ Complete
+
+**Overview:**
+Integrated Polar for usage-based billing and metering. Added usage tracking for text-to-speech generations and custom voice creations.
+
+**Key Components & Changes:**
+
+### 14.1 Polar Metering Integration
+- **`src/lib/polar.ts`**: Configured Polar SDK for server-side usage ingestion.
+- **`src/trpc/routers/generations.ts`**: Integrated `polar.events.ingest` for `tts_generation` events, automatically metering text-to-speech usage by character count (`metadata: { "characters": input.text.length }`).
+- **`src/app/api/voices/create/route.ts`**: Implemented `polar.events.ingest` for tracking custom voice creations.
+
+### 14.2 Billing UI and State
+- **`src/features/billing/components/usage-container.tsx`**: Added a new usage container to track and display current billing usage metrics to the user.
+- **`src/features/billing/hooks/use-checkout.ts`**: Created a hook to manage the Stripe/Polar checkout flow.
+- **`src/trpc/routers/billing.ts`**: Implemented the billing tRPC router to handle checkout sessions, subscription management, and fetching usage metrics.
+- **`src/features/dashboard/components/dashboard-sidebar.tsx`**: Updated the dashboard sidebar layout to accommodate billing navigation and incorporate the new usage container.
+
+### 14.3 Voice Management UI Updates
+- **`src/features/voices/components/voice-card.tsx`**: Created a polished `VoiceCard` component to display created voices.
+- **`src/features/voices/components/voice-create-dialog.tsx`**: Implemented a dialog for creating custom voices, hooking into the metered creation route.
+
+### 14.4 Next.js Configuration Updates
+- **`package.json` & `package-lock.json`**: Added necessary billing/polar dependencies.
+- **`src/lib/env.ts`**: Added environment variables for Polar integration.
 
